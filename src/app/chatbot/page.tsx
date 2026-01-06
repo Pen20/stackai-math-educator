@@ -28,7 +28,8 @@ export default function NEA_Chatbot() {
     setInput("");
     setIsTyping(true);
 
-    const history = [
+    // Explicitly type the history array to satisfy TypeScript build
+    const history: { role: "user" | "assistant"; content: string }[] = [
       ...messages.slice(-6).map(m => ({
         role: m.role as "user" | "assistant",
         content: m.content,
