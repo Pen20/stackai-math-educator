@@ -9,7 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^3.0.10",
     "@clerk/nextjs": "^6.36.5",
+    "@convex-dev/agent": "^0.3.2",
+    "@convex-dev/rag": "^0.6.1",
     "@radix-ui/react-accordion": "^1.2.12",
     "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-dialog": "^1.1.15",
@@ -17,6 +20,7 @@
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-slot": "^1.2.4",
+    "ai": "^6.0.35",
     "class-variance-authority": "^0.7.1",
     "clerk-react": "^0.1.9",
     "clsx": "^2.1.1",
@@ -32,7 +36,8 @@
     "recharts": "2.15.4",
     "resend": "^6.6.0",
     "svix": "^1.84.1",
-    "tailwind-merge": "^3.4.0"
+    "tailwind-merge": "^3.4.0",
+    "zod": "^4.3.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -39,7 +39,7 @@ export default function IndicesChart() {
         {/* Difficulty Index - Higher is easier */}
         <Bar 
           name="Difficulty Index" 
-          dataKey="difficulty" 
+          dataKey="difficultyIndex" 
           fill="#3b82f6" 
           radius={[4, 4, 0, 0]} 
           barSize={20} 
@@ -48,7 +48,7 @@ export default function IndicesChart() {
         {/* Discrimination Index - Higher is better at separating students */}
         <Bar 
           name="Discrimination Index" 
-          dataKey="discrimination" 
+          dataKey="discriminationIndex" 
           fill="#10b981" 
           radius={[4, 4, 0, 0]} 
           barSize={20} 

@@ -14,7 +14,7 @@ export const getVisibleErrors = query({
     // 1. Always get the "System" default data
     const defaultData = await ctx.db
       .query("studentErrors")
-      .filter((q) => q.eq(q.field("createdBy"), "system"))
+      .withIndex("by_createdBy", (q) => q.eq("createdBy", "system"))
       .collect();
 
     if (!identity) return defaultData;
@@ -22,7 +22,7 @@ export const getVisibleErrors = query({
     // 2. Get the user's private uploads
     const userData = await ctx.db
       .query("studentErrors")
-      .filter((q) => q.eq(q.field("createdBy"), identity.subject))
+      .withIndex("by_createdBy", (q) => q.eq("createdBy", identity.subject))
       .collect();
 
     // If the user has uploaded their own data, show that instead of the default
@@ -78,5 +78,13 @@ export const getByStudentAndQuestion = query({
         )
       )
       .collect();
+  },
+});
+
+import { internalQuery } from "./_generated/server";
+
+export const getAllErrors = internalQuery({
+  handler: async (ctx) => {
+    return await ctx.db.query("studentErrors").collect();
   },
 });
