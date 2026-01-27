@@ -58,6 +58,16 @@ export default defineSchema({
     createdAt: v.number(),
   }),
 
+  // Documents table for RAG chunks
+  documents: defineTable({
+    text: v.string(),
+    metadata: v.any(),
+    embedding: v.array(v.float64()),
+  }).vectorIndex("by_embedding", {
+    vectorField: "embedding",
+    dimensions: 1536,
+  }),
+
   // RAG Context Usage Logging
   contextUsed: defineTable({
     messageId: v.string(),

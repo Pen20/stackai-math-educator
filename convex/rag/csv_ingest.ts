@@ -2,8 +2,6 @@
 
 import { action } from "../_generated/server";
 import { internal } from "../_generated/api";
-import { RAG } from "@convex-dev/rag";
-import { textEmbeddingModel } from "../modelsForDemo";
 import { components } from "../_generated/api";
 import * as fs from "fs";
 import * as path from "path";
@@ -11,11 +9,6 @@ import * as path from "path";
 // but here we'll do a simple split or use a library if available. 
 // The package.json showed "papaparse" dependency.
 import Papa from "papaparse";
-
-const rag = new RAG(components.rag, {
-  textEmbeddingModel,
-  embeddingDimension: 1536,
-});
 
 export const ingestCsv = action({
   // Action to ingest data/predicting_students_errors.csv
@@ -55,17 +48,18 @@ export const ingestCsv = action({
       if (!row.question || !row.response) continue;
 
       // Construct a rich text representation for RAG
-      const text = \`
-Question: \${row.question}
-Student Response: \${row.response}
-Right Answer: \${row.right_answer}
-Error Summary: \${row.error_summary}
-Error Category: \${row.error_category}
-LLM Analysis: \${row.llm_response}
-\`.trim();
+      const text = `
+Question: ${row.question}
+Student Response: ${row.response}
+Right Answer: ${row.right_answer}
+Error Summary: ${row.error_summary}
+Error Category: ${row.error_category}
+LLM Analysis: ${row.llm_response}
+`.trim();
 
-      await rag.add(ctx, {
-        namespace: "student-misconceptions-csv",
+      // Use the new native ingest action for each row
+      // This handles chunking and embedding internally
+      await ctx.runAction((internal as any).rag.native.ingest, {
         text: text,
         metadata: {
           studentId: row.student_id,
@@ -76,6 +70,6 @@ LLM Analysis: \${row.llm_response}
       count++;
     }
 
-    return \`Ingested \${count} rows from CSV.\`;
+    return `Ingested ${count} rows from CSV using Native RAG.`;
   },
 });

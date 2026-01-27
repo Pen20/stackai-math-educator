@@ -2,7 +2,7 @@
 
 import { action } from "./_generated/server";
 import { v } from "convex/values";
-import { teacherAssistant } from "./agent";
+import { teacherAssistant } from "./agents/teacher";
 
 /**
  * Modern Chat Action

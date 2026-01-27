@@ -1,30 +1,24 @@
 import { createTool } from "@convex-dev/agent";
 import { v } from "convex/values";
-import { z } from "zod"; // Using zod (v3 is compatible, usually imports from "zod")
-import { components, api } from "../_generated/api";
+import { z } from "zod";
+import { api, internal } from "../_generated/api";
 import { action } from "../_generated/server";
-import { agent } from "../agents/simple";
-import { RAG } from "@convex-dev/rag";
-import { textEmbeddingModel } from "../modelsForDemo";
+import { teacherAssistant } from "../agents/teacher";
 
-const rag = new RAG(components.rag, {
-  textEmbeddingModel: textEmbeddingModel as any,
-  embeddingDimension: 1536,
-});
-
-const NEWMAN_STAGES_GUIDE = \`
+// FIX: Removed the backslash before the backticks
+const NEWMAN_STAGES_GUIDE = `
 1. Reading: decoding the problem's text and symbols.
 2. Comprehension: understanding the meaning of the problem.
 3. Transformation: selecting the appropriate mathematical strategy/formula.
 4. Process Skills: performing the calculation steps.
 5. Encoding: formulating and expressing the final answer.
-\`;
+`;
 
 export const sendMessage = action({
   args: { threadId: v.string(), prompt: v.string() },
   handler: async (ctx, { threadId, prompt }) => {
     
-    await agent.generateText(
+    await teacherAssistant.generateText(
       ctx,
       { threadId },
       {
@@ -37,17 +31,17 @@ export const sendMessage = action({
               query: z.string().describe("The error description or mathematical concept to search for."),
             }),
             handler: async (ctx, args) => {
-              const results = await rag.search(ctx, {
-                namespace: "student-misconceptions-csv",
+              const results = await ctx.runAction((internal as any).rag.native.searchAction, {
                 query: args.query,
                 limit: 3,
               });
               
-              const contextText = results.results
-                .map((r) => \`Content: \${r.content[0]?.text}\`)
-                .join("\\n---\\n");
+              // FIX: Removed backslashes from the mapping template
+              const contextText = results
+                .map((r: any) => `Content: ${r.text}`)
+                .join("\n---\n");
                 
-              return \`Found similar past errors:\\n\${contextText}\`;
+              return `Found similar past errors:\n${contextText}`;
             },
           }),
 
@@ -58,15 +52,12 @@ export const sendMessage = action({
               threshold: z.number().optional().describe("The grade threshold to define at-risk (default 0.5)"),
             }),
             handler: async (ctx, args) => {
-              // Call the existing at-risk students query
               const atRisk = await ctx.runQuery(api.analysis.getAtRiskStudents, {
                 threshold: args.threshold ?? 0.5,
               });
-              // Optionally call getQuestionIndices if needed for "general indices"
-              // For now, we return the at-risk list and a summary.
               
               return JSON.stringify({
-                summary: \`Found \${atRisk.length} at-risk students.\`,
+                summary: `Found ${atRisk.length} at-risk students.`,
                 students: atRisk,
               });
             },
@@ -79,27 +70,25 @@ export const sendMessage = action({
               errorDescription: z.string().describe("The student's error or response to analyze."),
             }),
             handler: async (ctx, args) => {
-              // 1. Search for examples of this specific error
-              const similarErrors = await rag.search(ctx, {
-                namespace: "student-misconceptions-csv",
+              const similarErrors = await ctx.runAction((internal as any).rag.native.searchAction, {
                 query: args.errorDescription,
                 limit: 3,
               });
               
-              const examples = similarErrors.results
-                .map(r => \`Example: \${r.content[0]?.text}\`)
-                .join("\\n");
+              const examples = similarErrors
+                .map((r: any) => `Example: ${r.text}`)
+                .join("\n");
 
-              // 2. Return the Framework + Examples so the Agent can classify the current error
-              return \`
+              // FIX: Removed backslashes from the multi-line return string
+              return `
 # Newman's Error Analysis Framework
-\${NEWMAN_STAGES_GUIDE}
+${NEWMAN_STAGES_GUIDE}
 
 # Similar Examples from Database
-\${examples}
+${examples}
 
 Instructions: Compare the input error to the examples and classifications above. Determine which Newman stage the error likely falls into.
-\`;
+`;
             },
           }),
         },
