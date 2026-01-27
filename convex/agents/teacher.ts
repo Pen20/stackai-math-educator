@@ -7,7 +7,7 @@ import { ActionCtx } from "../_generated/server";
 
 export const teacherAssistant: any = new Agent(components.agent as any, {
   name: "teacherAssistant",
-  languageModel: openai("gpt-4o"), // Use the provider function directly
+  languageModel: openai("gpt-4o") as any, // Use the provider function directly
   instructions: `You are an expert educational AI assistant specializing in Mathematics and Error Analysis. 
   Your primary role is to analyze student performance data using RAG techniques to:
   1. Identify students at higher risk of failure or consistent struggle.
