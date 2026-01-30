@@ -31,6 +31,9 @@ export default function Navbar() {
             <Link href="/dashboard" className="text-sm font-medium text-slate-600 hover:text-blue-600 flex items-center gap-1.5">
               <LayoutDashboard className="h-4 w-4" /> Dashboard
             </Link>
+            <Link href="/chatbot" className="text-sm font-medium text-slate-600 hover:text-blue-600 flex items-center gap-1.5">
+              <MessageSquare className="h-4 w-4" /> Chatbot
+            </Link>
           </div>
         </SignedIn>
 
