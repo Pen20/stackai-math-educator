@@ -48,11 +48,6 @@ export default function Home() {
                   <BarChart3 className="h-5 w-5" /> View Dashboard
                 </Button>
               </Link>
-              <Link href="/chatbot">
-                <Button variant="outline" size="lg" className="gap-2 px-8">
-                  <MessageSquare className="h-5 w-5" /> Open AI Chat
-                </Button>
-              </Link>
             </>
           ) : (
             <SignInButton mode="modal">

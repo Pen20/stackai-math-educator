@@ -38,16 +38,16 @@ export default defineSchema({
 
   // Integrated Messages table for the Agent Component
   // This replaces legacy message structures to support Agent Threads
-  messages: defineTable({
-    userId: v.string(), // Clerk ID or anonymous ID
-    role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system"), v.literal("tool")),
-    content: v.string(),
-    threadId: v.optional(v.string()), // Links to the Agent Thread ID
-    timestamp: v.number(),
-    status: v.optional(v.string()), // e.g., "pending", "success", "failed"
-  })
-  .index("by_userId", ["userId"])
-  .index("by_threadId", ["threadId"]),
+  // messages: defineTable({
+  //   userId: v.string(), // Clerk ID or anonymous ID
+  //   role: v.union(v.literal("user"), v.literal("assistant"), v.literal("system"), v.literal("tool")),
+  //   content: v.string(),
+  //   threadId: v.optional(v.string()), // Links to the Agent Thread ID
+  //   timestamp: v.number(),
+  //   status: v.optional(v.string()), // e.g., "pending", "success", "failed"
+  // })
+  // .index("by_userId", ["userId"])
+  // .index("by_threadId", ["threadId"]),
 
   // Feedback and contact data
   feedback: defineTable({
