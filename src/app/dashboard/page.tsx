@@ -21,8 +21,6 @@ import NEAPieChart from "@/components/dashboard/NEAPieChart";
 import IndicesChart from "@/components/dashboard/IndicesChart";
 import { CSVUploader } from "@/components/dashboard/CSVUploader";
 import IndicesGuide from "@/components/dashboard/IndicesGuide";
-// SimpleRAG component is now on its own page, but keeping import for safety or if needed elsewhere
-import SimpleRAG from "@/components/dashboard/SimpleRAG";
 
 export default function Dashboard() {
   const [showGradeDist, setShowGradeDist] = useState(false);
