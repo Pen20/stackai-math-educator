@@ -123,3 +123,20 @@
     @apply bg-background text-foreground;
   }
 }
+
+.markdown-content strong {
+  font-weight: 700;
+}
+.markdown-content p {
+  margin-bottom: 0.5rem;
+}
+.markdown-content p:last-child {
+  margin-bottom: 0;
+}
+.markdown-content ul, .markdown-content ol {
+  margin-left: 1.25rem;
+  margin-bottom: 0.5rem;
+}
+.markdown-content li {
+  list-style-type: disc;
+}

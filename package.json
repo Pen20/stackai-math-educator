@@ -9,7 +9,7 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "@ai-sdk/openai": "^3.0.10",
+    "@ai-sdk/openai": "^3.0.26",
     "@clerk/nextjs": "^6.36.5",
     "@convex-dev/agent": "^0.3.2",
     "@convex-dev/rag": "^0.6.1",
@@ -20,7 +20,7 @@
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-select": "^2.2.6",
     "@radix-ui/react-slot": "^1.2.4",
-    "ai": "^5.0.0",
+    "ai": "^6.0.75",
     "class-variance-authority": "^0.7.1",
     "clerk-react": "^0.1.9",
     "clsx": "^2.1.1",
@@ -34,6 +34,7 @@
     "papaparse": "^5.5.3",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "react-markdown": "^10.1.0",
     "recharts": "2.15.4",
     "resend": "^6.6.0",
     "svix": "^1.84.1",

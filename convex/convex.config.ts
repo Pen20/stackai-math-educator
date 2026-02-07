@@ -4,6 +4,6 @@ import agent from "@convex-dev/agent/convex.config";
 
 const app = defineApp();
 // app.use(rag);
-app.use(agent);
+// app.use(agent);
 
 export default app;

@@ -14,17 +14,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "@/components/ui/accordion";
+import Link from "next/link";
 
 import GradeDistribution from "@/components/dashboard/GradeDistribution";
 import NEAPieChart from "@/components/dashboard/NEAPieChart";
 import IndicesChart from "@/components/dashboard/IndicesChart";
 import { CSVUploader } from "@/components/dashboard/CSVUploader";
 import IndicesGuide from "@/components/dashboard/IndicesGuide";
+// SimpleRAG component is now on its own page, but keeping import for safety or if needed elsewhere
+import SimpleRAG from "@/components/dashboard/SimpleRAG";
 
 export default function Dashboard() {
   const [showGradeDist, setShowGradeDist] = useState(false);
   const [showPieChart, setShowPieChart] = useState(false);
   const [showIndices, setShowIndices] = useState(false);
+  // No longer needed: const [showSimpleRAG, setShowSimpleRAG] = useState(false);
   const [selectedQuestion, setSelectedQuestion] = useState<string>("");
   const [filterGradeByQuestion, setFilterGradeByQuestion] = useState(false);
 
@@ -129,6 +133,15 @@ export default function Dashboard() {
         >
           <BarChart3 className="h-4 w-4" /> Question Indices
         </Button>
+
+        <Link href="/chatbot">
+          <Button 
+            variant="secondary"
+            className="gap-2 border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50"
+          >
+            <BrainCircuit className="h-4 w-4 text-indigo-500" /> Go to AI Chatbot
+          </Button>
+        </Link>
       </div>
 
       {/* Main Content Area */}

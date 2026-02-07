@@ -68,6 +68,19 @@ export default defineSchema({
     dimensions: 1536,
   }),
 
+  // Simple RAG: Documents without embeddings
+  simple_documents: defineTable({
+    name: v.string(),
+    text: v.string(),
+    createdBy: v.string(), // Clerk ID or "system"
+    createdAt: v.number(),
+  })
+  .index("by_createdBy", ["createdBy"])
+  .searchIndex("search_text", {
+    searchField: "text",
+    filterFields: ["createdBy"],
+  }),
+
   // RAG Context Usage Logging
   contextUsed: defineTable({
     messageId: v.string(),
