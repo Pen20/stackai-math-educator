@@ -220,7 +220,7 @@ export default function Dashboard() {
                   <BookText className="h-4 w-4 text-orange-500" /> Reading Error
                 </h4>
                 <p className="text-sm text-slate-500 leading-relaxed">
-                  Misreading or misinterpreting text/symbols. Identifying components correctly.
+                  Misreading or misinterpreting text/symbols.
                 </p>
               </div>
               <div className="space-y-2">
@@ -252,7 +252,7 @@ export default function Dashboard() {
                   <PenTool className="h-4 w-4 text-emerald-600" /> Encoding Error
                 </h4>
                 <p className="text-sm text-slate-500 leading-relaxed">
-                  Correct solution reached but expressed incorrectly (units, notation).
+                  Correct or near-correct solution reached but expressed incorrectly (units, notation).
                 </p>
               </div>
               <div className="flex items-center p-4 bg-blue-50 rounded-lg gap-3">
