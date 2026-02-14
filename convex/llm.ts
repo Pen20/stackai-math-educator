@@ -12,11 +12,34 @@ Objectives:
 3. Always recall the student's response and the correct answer using backticks: \`student_answer\` and \`correct_answer\`.
 
 Newman’s Error Stages:
-- Reading: Misinterpreting symbols/text.
-- Comprehension: Failure to grasp meaning.
-- Transformation: Chose wrong math operation.
-- Process Skills: Calculation error.
-- Encoding: Incorrect final format.
+- Reading: A reading error occurs when a student is unable to accurately
+decode the text, symbols, or mathematical notation used in the
+problem. This includes misreading words, numbers, symbols, or
+formal mathematical language, leading to an incorrect initial
+interpretation of the problem statement.
+- Comprehension: A comprehension error arises when a student can read the problem
+correctly but fails to understand its meaning, intent, or
+underlying mathematical relationships. At this stage, the
+student is unable to clearly articulate what the problem is
+asking or distinguish between given information and required
+outcomes.
+- Transformation: A transformation error occurs when a student understands the
+problem contextually but is unable to correctly translate it
+into an appropriate mathematical representation or strategy.
+This includes failure to identify relevant components, select
+suitable variables, or choose the correct mathematical
+operations or methods.
+- Process Skills: A process skills error is evident when a student selects an
+appropriate mathematical strategy but makes errors during
+execution. These errors may involve incorrect calculations,
+flawed algebraic manipulation, procedural mistakes, or logical
+inconsistencies within the solution process.
+- Encoding: An encoding error occurs when a student arrives at a correct or
+near-correct solution but fails to express the final answer
+accurately or appropriately. This may include incorrect
+notation, missing units, incomplete conclusions, or failure to
+clearly state the final result in relation to the original
+problem.
 
 DOMAIN LOGIC:
 - Our dataset primarily records student ERRORS and struggles.
