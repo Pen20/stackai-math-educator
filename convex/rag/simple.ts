@@ -10,14 +10,24 @@ export const ingest = mutation({
     const identity = await ctx.auth.getUserIdentity();
     const userId = identity ? identity.subject : "system";
 
-    // Convex has a 1MB limit for document fields. 
-    // We use smaller chunks (e.g., 4KB) for better retrieval precision
-    // and to stay within LLM context window limits.
-    const CHUNK_SIZE = 4 * 1024; // 4KB
-    const chunks = [];
-    
-    for (let i = 0; i < args.text.length; i += CHUNK_SIZE) {
-      chunks.push(args.text.slice(i, i + CHUNK_SIZE));
+    // Split text into overlapping word-boundary-aligned chunks for better search quality.
+    // Raw byte slicing cuts words in half, which degrades full-text search recall.
+    const CHUNK_SIZE = 1500;  // characters (~375 tokens)
+    const OVERLAP    = 150;   // characters carried into next chunk for context continuity
+    const chunks: string[] = [];
+    let start = 0;
+
+    while (start < args.text.length) {
+      let end = start + CHUNK_SIZE;
+      if (end >= args.text.length) {
+        chunks.push(args.text.slice(start));
+        break;
+      }
+      // Walk back to the nearest word boundary so we never cut mid-word
+      const boundary = args.text.lastIndexOf(" ", end);
+      end = boundary > start ? boundary : end;
+      chunks.push(args.text.slice(start, end));
+      start = end - OVERLAP;
     }
 
     const ids = [];

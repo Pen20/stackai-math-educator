@@ -81,6 +81,14 @@ export default defineSchema({
     filterFields: ["createdBy"],
   }),
 
+  // Persisted chatbot conversation history per user
+  chat_messages: defineTable({
+    userId: v.string(),
+    role: v.union(v.literal("user"), v.literal("assistant")),
+    content: v.string(),
+    createdAt: v.number(),
+  }).index("by_userId", ["userId"]),
+
   // RAG Context Usage Logging
   contextUsed: defineTable({
     messageId: v.string(),

@@ -9,6 +9,7 @@
  */
 
 import type * as analysis from "../analysis.js";
+import type * as chat from "../chat.js";
 import type * as documents from "../documents.js";
 import type * as feedback from "../feedback.js";
 import type * as llm from "../llm.js";
@@ -27,6 +28,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   analysis: typeof analysis;
+  chat: typeof chat;
   documents: typeof documents;
   feedback: typeof feedback;
   llm: typeof llm;
