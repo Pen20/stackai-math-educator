@@ -74,36 +74,35 @@ export const getAtRiskStudents = query({
 });
 
 export const getQuestionIndices = query({
-  handler: async (ctx) => {
+  args: { totalStudentCount: v.optional(v.number()) },
+  handler: async (ctx, args) => {
     const records = await getVisibleRecords(ctx);
     if (records.length === 0) return { questions: [], studentCount: 0 };
 
-    // Deduplicate: for students with multiple attempts on the same question, average their grades
-    const gradeMap = new Map<string, { total: number; count: number }>();
-    records.forEach((r) => {
-      const key = `${r.studentId}||${r.question}`;
-      const current = gradeMap.get(key) || { total: 0, count: 0 };
-      gradeMap.set(key, { total: current.total + r.grade, count: current.count + 1 });
-    });
+    const representedStudentIds = [...new Set(records.map((record) => record.studentId))];
+    const suppliedCohortSize = args.totalStudentCount === undefined
+      ? representedStudentIds.length
+      : Math.max(representedStudentIds.length, Math.floor(args.totalStudentCount));
+    const syntheticCorrectStudents = Array.from(
+      { length: suppliedCohortSize - representedStudentIds.length },
+      (_, index) => `__all_correct_${index + 1}`,
+    );
+    const studentIds = [...representedStudentIds, ...syntheticCorrectStudents];
+    const questionIds = [...new Set(records.map((record) => record.question))];
+    const observedGrades = new Map<string, number>();
+    for (const record of records) {
+      observedGrades.set(`${record.studentId}||${record.question}`, record.grade);
+    }
+    const gradeFor = (studentId: string, question: string) =>
+      observedGrades.get(`${studentId}||${question}`) ?? 1;
 
-    const dedupedRecords = Array.from(gradeMap.entries()).map(([key, stats]) => {
-      const sep = key.indexOf("||");
-      return {
-        studentId: key.slice(0, sep),
-        question: key.slice(sep + 2),
-        grade: stats.total / stats.count,
-      };
-    });
-
-    // 1. Rank students by their overall average grade
-    const studentStats = new Map<string, { total: number; count: number }>();
-    dedupedRecords.forEach((r) => {
-      const current = studentStats.get(r.studentId) || { total: 0, count: 0 };
-      studentStats.set(r.studentId, { total: current.total + r.grade, count: current.count + 1 });
-    });
-
-    const sortedStudents = Array.from(studentStats.entries())
-      .map(([id, stats]) => ({ id, avg: stats.total / stats.count }))
+    // Rank students by reconstructed overall assessment mean. The source data
+    // contains only grade < 1 records; a missing pair means fully correct.
+    const sortedStudents = studentIds
+      .map((id) => ({
+        id,
+        avg: questionIds.reduce((sum, question) => sum + gradeFor(id, question), 0) / questionIds.length,
+      }))
       .sort((a, b) => b.avg - a.avg);
 
     const studentCount = sortedStudents.length;
@@ -111,30 +110,33 @@ export const getQuestionIndices = query({
     const topGroup = new Set(sortedStudents.slice(0, boundary).map(s => s.id));
     const bottomGroup = new Set(sortedStudents.slice(-boundary).map(s => s.id));
 
-    // 2. Compute difficulty and discrimination indices per question
-    const questionIds = [...new Set(dedupedRecords.map(r => r.question))];
-
     const questions = questionIds.map((q) => {
-      const qRecords = dedupedRecords.filter(r => r.question === q);
-      const difficultyIndex = qRecords.reduce((acc, r) => acc + r.grade, 0) / qRecords.length;
-
-      const topGrades = qRecords.filter(r => topGroup.has(r.studentId));
-      const bottomGrades = qRecords.filter(r => bottomGroup.has(r.studentId));
-
-      const meanTop = topGrades.length > 0
-        ? topGrades.reduce((a, b) => a + b.grade, 0) / topGrades.length : 0;
-      const meanBottom = bottomGrades.length > 0
-        ? bottomGrades.reduce((a, b) => a + b.grade, 0) / bottomGrades.length : 0;
+      const questionErrorRecords = records.filter((record) => record.question === q);
+      const allGrades = studentIds.map((studentId) => gradeFor(studentId, q));
+      const difficultyIndex = allGrades.reduce((sum, grade) => sum + grade, 0) / allGrades.length;
+      const topGrades = studentIds.filter((id) => topGroup.has(id)).map((id) => gradeFor(id, q));
+      const bottomGrades = studentIds.filter((id) => bottomGroup.has(id)).map((id) => gradeFor(id, q));
+      const meanTop = topGrades.reduce((sum, grade) => sum + grade, 0) / topGrades.length;
+      const meanBottom = bottomGrades.reduce((sum, grade) => sum + grade, 0) / bottomGrades.length;
 
       return {
         question: q,
         difficultyIndex: parseFloat(difficultyIndex.toFixed(2)),
         discriminationIndex: parseFloat((meanTop - meanBottom).toFixed(2)),
-        sampleSize: qRecords.length,
+        sampleSize: studentIds.length,
+        observedErrorResponses: questionErrorRecords.length,
+        reconstructedCorrectResponses: studentIds.length - questionErrorRecords.length,
       };
     });
 
-    return { questions, studentCount };
+    return {
+      questions,
+      studentCount,
+      representedStudentCount: representedStudentIds.length,
+      suppliedCohortSize: args.totalStudentCount ?? null,
+      allCorrectStudentsAdded: syntheticCorrectStudents.length,
+      reconstructionRule: "Missing student-question records, including supplied cohort members with no error rows, are treated as fully correct responses (grade 1).",
+    };
   },
 });
 
@@ -243,11 +245,326 @@ export const getDataSummary = query({
       .join(", ");
 
     return [
-      `Dataset: ${records.length} student-question records`,
-      `Students: ${studentIds.length}`,
+      `Recorded errors: ${records.length} incorrect or partially correct responses`,
+      `Students represented: ${studentIds.length}`,
       `Questions: ${questions.join(", ")}`,
       `Average grade: ${avgGrade.toFixed(2)} (scale 0–1)`,
       `Top error categories: ${topCategories || "none"}`,
-    ].join("\n");
+    ].join("\n").replace("Average grade:", "Mean grade among recorded incorrect and partially correct responses:");
+  },
+});
+
+// ---------------------------------------------------------------------------
+// Conversational analytics
+//
+// The imported STACK dataset contains only incorrect and partially correct
+// responses. Every student is expected to answer every question, so a missing
+// student-question record is reconstructed as a fully correct response (1.0)
+// when calculating item indices. Error-focused summaries never silently add
+// those reconstructed responses.
+
+const round = (value: number, digits = 3) => {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+};
+
+const normaliseCategory = (category: string) =>
+  category.trim().toLowerCase().replace(/\s+errors?$/, "").replace(/\s+/g, "_");
+
+const mean = (values: number[]) =>
+  values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
+
+const median = (values: number[]) => {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+};
+
+const gradeBands = (grades: number[]) => {
+  const bands = [
+    { label: "0.0-0.2", min: 0, max: 0.2, count: 0 },
+    { label: "0.2-0.4", min: 0.2, max: 0.4, count: 0 },
+    { label: "0.4-0.6", min: 0.4, max: 0.6, count: 0 },
+    { label: "0.6-0.8", min: 0.6, max: 0.8, count: 0 },
+    { label: "0.8-1.0", min: 0.8, max: 1.000001, count: 0 },
+  ];
+  for (const grade of grades) {
+    const band = bands.find((item, index) =>
+      grade >= item.min && (index === bands.length - 1 ? grade <= item.max : grade < item.max)
+    );
+    if (band) band.count += 1;
+  }
+  return bands.map(({ label, count }) => ({
+    label,
+    count,
+    percentage: grades.length ? round((count / grades.length) * 100, 1) : 0,
+  }));
+};
+
+function categoryStatistics(records: Array<{ studentId: string; errorCategory: string[] }>) {
+  const occurrences = new Map<string, number>();
+  const students = new Map<string, Set<string>>();
+  for (const record of records) {
+    for (const rawCategory of record.errorCategory) {
+      const category = normaliseCategory(rawCategory);
+      if (!category) continue;
+      occurrences.set(category, (occurrences.get(category) ?? 0) + 1);
+      if (!students.has(category)) students.set(category, new Set());
+      students.get(category)!.add(record.studentId);
+    }
+  }
+  const totalOccurrences = [...occurrences.values()].reduce((sum, value) => sum + value, 0);
+  return [...occurrences.entries()]
+    .map(([category, occurrenceCount]) => ({
+      category,
+      occurrenceCount,
+      shareOfCategoryOccurrences: totalOccurrences
+        ? round((occurrenceCount / totalOccurrences) * 100, 1)
+        : 0,
+      affectedStudentCount: students.get(category)?.size ?? 0,
+      responsePercentage: records.length
+        ? round((occurrenceCount / records.length) * 100, 1)
+        : 0,
+    }))
+    .sort((a, b) => b.occurrenceCount - a.occurrenceCount);
+}
+
+export const getErrorDatasetOverview = query({
+  handler: async (ctx) => {
+    const records = await getVisibleRecords(ctx);
+    const students = new Set(records.map((record) => record.studentId));
+    const questions = [...new Set(records.map((record) => record.question))].sort();
+    const grades = records.map((record) => record.grade);
+    return {
+      scope: "Incorrect and partially correct STACK responses only; grade < 1.",
+      errorRecordCount: records.length,
+      representedStudentCount: students.size,
+      questionCount: questions.length,
+      questions,
+      seedVariantCount: new Set(records.map((record) => record.seedId)).size,
+      meanGradeAmongErrorResponses: round(mean(grades)),
+      medianGradeAmongErrorResponses: round(median(grades)),
+      gradeDistribution: gradeBands(grades),
+      categories: categoryStatistics(records),
+    };
+  },
+});
+
+export const getQuestionErrorProfile = query({
+  args: { question: v.string() },
+  handler: async (ctx, args) => {
+    const allRecords = await getVisibleRecords(ctx);
+    const records = allRecords.filter((record) => record.question === args.question);
+    const grades = records.map((record) => record.grade);
+    const combinations = new Map<string, number>();
+    for (const record of records) {
+      const key = record.errorCategory.map(normaliseCategory).filter(Boolean).sort().join(" + ") || "uncategorised";
+      combinations.set(key, (combinations.get(key) ?? 0) + 1);
+    }
+    return {
+      scope: "Incorrect and partially correct responses for the selected question only.",
+      question: args.question,
+      errorResponseCount: records.length,
+      affectedStudentCount: new Set(records.map((record) => record.studentId)).size,
+      meanGradeAmongErrorResponses: round(mean(grades)),
+      medianGradeAmongErrorResponses: round(median(grades)),
+      gradeDistribution: gradeBands(grades),
+      categories: categoryStatistics(records),
+      commonCategoryCombinations: [...combinations.entries()]
+        .map(([combination, count]) => ({ combination, count }))
+        .sort((a, b) => b.count - a.count)
+        .slice(0, 10),
+    };
+  },
+});
+
+export const getStudentErrorProfile = query({
+  args: { studentId: v.string() },
+  handler: async (ctx, args) => {
+    const allRecords = await getVisibleRecords(ctx);
+    const records = allRecords.filter((record) => record.studentId === args.studentId);
+    const categoryCounts = new Map<string, number>();
+    for (const record of records) {
+      for (const rawCategory of record.errorCategory) {
+        const category = normaliseCategory(rawCategory);
+        categoryCounts.set(category, (categoryCounts.get(category) ?? 0) + 1);
+      }
+    }
+    return {
+      scope: "Error profile only. Missing student-question records are treated as correct responses.",
+      studentId: args.studentId,
+      recordedErrorCount: records.length,
+      recordedCorrectCount: Math.max(0, new Set(allRecords.map((record) => record.question)).size - records.length),
+      meanGradeAmongErrorResponses: records.length ? round(mean(records.map((record) => record.grade))) : null,
+      recurringErrors: [...categoryCounts.entries()]
+        .map(([category, count]) => ({ category, count }))
+        .sort((a, b) => b.count - a.count),
+      responses: records.map((record) => ({
+        question: record.question,
+        seedId: record.seedId,
+        grade: record.grade,
+        categories: record.errorCategory.map(normaliseCategory),
+        errorSummary: record.errorSummary,
+        response: record.response,
+        rightAnswer: record.rightAnswer,
+      })),
+    };
+  },
+});
+
+export const getErrorExamples = query({
+  args: {
+    category: v.string(),
+    question: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const wanted = normaliseCategory(args.category);
+    const records = (await getVisibleRecords(ctx)).filter((record) =>
+      (!args.question || record.question === args.question) &&
+      record.errorCategory.some((category) => normaliseCategory(category) === wanted)
+    );
+    const limit = Math.min(Math.max(Math.floor(args.limit ?? 5), 1), 10);
+    return {
+      scope: "Representative records from incorrect and partially correct responses.",
+      category: wanted,
+      question: args.question ?? null,
+      matchingRecordCount: records.length,
+      examples: records.slice(0, limit).map((record) => ({
+        studentId: record.studentId,
+        question: record.question,
+        seedId: record.seedId,
+        grade: record.grade,
+        response: record.response,
+        rightAnswer: record.rightAnswer,
+        errorSummary: record.errorSummary,
+        categories: record.errorCategory.map(normaliseCategory),
+      })),
+    };
+  },
+});
+
+export const getSupportPriorityStudents = query({
+  args: {
+    maximumMeanErrorGrade: v.optional(v.number()),
+    maximumSingleGrade: v.optional(v.number()),
+    minimumErrorResponses: v.optional(v.number()),
+    minimumQuestionsAffected: v.optional(v.number()),
+    minimumRepeatedCategoryCount: v.optional(v.number()),
+    errorCategory: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const records = await getVisibleRecords(ctx);
+    const byStudent = new Map<string, typeof records>();
+    for (const record of records) {
+      if (!byStudent.has(record.studentId)) byStudent.set(record.studentId, []);
+      byStudent.get(record.studentId)!.push(record);
+    }
+    const wantedCategory = args.errorCategory ? normaliseCategory(args.errorCategory) : null;
+    const minimumErrors = Math.max(1, Math.floor(args.minimumErrorResponses ?? 3));
+    const minimumQuestions = Math.max(1, Math.floor(args.minimumQuestionsAffected ?? 2));
+    const minimumRecurrence = Math.max(1, Math.floor(args.minimumRepeatedCategoryCount ?? 2));
+    const maximumMean = args.maximumMeanErrorGrade ?? 0.5;
+    const limit = Math.min(Math.max(Math.floor(args.limit ?? 25), 1), 50);
+
+    const matches = [...byStudent.entries()].flatMap(([studentId, studentRecords]) => {
+      const categoryCounts = new Map<string, number>();
+      for (const record of studentRecords) {
+        for (const rawCategory of record.errorCategory) {
+          const category = normaliseCategory(rawCategory);
+          categoryCounts.set(category, (categoryCounts.get(category) ?? 0) + 1);
+        }
+      }
+      const meanErrorGrade = mean(studentRecords.map((record) => record.grade));
+      const questionsAffected = new Set(studentRecords.map((record) => record.question)).size;
+      const maxRecurrence = Math.max(0, ...categoryCounts.values());
+      const hasCategory = !wantedCategory || (categoryCounts.get(wantedCategory) ?? 0) > 0;
+      const hasSevereError = args.maximumSingleGrade === undefined ||
+        studentRecords.some((record) => record.grade <= args.maximumSingleGrade!);
+      if (
+        studentRecords.length < minimumErrors ||
+        questionsAffected < minimumQuestions ||
+        maxRecurrence < minimumRecurrence ||
+        meanErrorGrade > maximumMean ||
+        !hasCategory ||
+        !hasSevereError
+      ) return [];
+      return [{
+        studentId,
+        errorResponseCount: studentRecords.length,
+        questionsAffected,
+        meanGradeAmongErrorResponses: round(meanErrorGrade),
+        lowestGrade: Math.min(...studentRecords.map((record) => record.grade)),
+        recurringErrors: [...categoryCounts.entries()]
+          .map(([category, count]) => ({ category, count }))
+          .sort((a, b) => b.count - a.count),
+      }];
+    }).sort((a, b) =>
+      b.errorResponseCount - a.errorResponseCount ||
+      a.meanGradeAmongErrorResponses - b.meanGradeAmongErrorResponses
+    );
+
+    return {
+      scope: "Support-priority screening among students with recorded errors; this is not a definitive risk classification.",
+      criteria: {
+        maximumMeanErrorGrade: maximumMean,
+        maximumSingleGrade: args.maximumSingleGrade ?? null,
+        minimumErrorResponses: minimumErrors,
+        minimumQuestionsAffected: minimumQuestions,
+        minimumRepeatedCategoryCount: minimumRecurrence,
+        errorCategory: wantedCategory,
+      },
+      totalMatchingStudents: matches.length,
+      students: matches.slice(0, limit),
+      truncated: matches.length > limit,
+    };
+  },
+});
+
+export const compareQuestionErrors = query({
+  args: { questions: v.array(v.string()) },
+  handler: async (ctx, args) => {
+    const records = await getVisibleRecords(ctx);
+    return {
+      scope: "Comparison of incorrect and partially correct responses only.",
+      questions: args.questions.map((question) => {
+        const selected = records.filter((record) => record.question === question);
+        return {
+          question,
+          errorResponseCount: selected.length,
+          affectedStudentCount: new Set(selected.map((record) => record.studentId)).size,
+          meanGradeAmongErrorResponses: selected.length
+            ? round(mean(selected.map((record) => record.grade)))
+            : null,
+          categories: categoryStatistics(selected),
+        };
+      }),
+    };
+  },
+});
+
+export const compareSeedVariants = query({
+  args: { question: v.string() },
+  handler: async (ctx, args) => {
+    const records = (await getVisibleRecords(ctx)).filter((record) => record.question === args.question);
+    const bySeed = new Map<string, typeof records>();
+    for (const record of records) {
+      if (!bySeed.has(record.seedId)) bySeed.set(record.seedId, []);
+      bySeed.get(record.seedId)!.push(record);
+    }
+    return {
+      scope: "Descriptive comparison of recorded error responses by seed. Correct students' assigned seeds are unavailable, so seed-specific success rates cannot be calculated.",
+      question: args.question,
+      variants: [...bySeed.entries()].map(([seedId, selected]) => ({
+        seedId,
+        errorResponseCount: selected.length,
+        meanGradeAmongErrorResponses: round(mean(selected.map((record) => record.grade))),
+        categories: categoryStatistics(selected).slice(0, 5),
+      })).sort((a, b) => b.errorResponseCount - a.errorResponseCount),
+    };
   },
 });

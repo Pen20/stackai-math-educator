@@ -30,7 +30,7 @@ export default function ChatbotPage() {
       </main>
 
       <footer className="text-center text-slate-400 text-xs py-10">
-        Using GPT-4o with direct document context injection.
+        Structured STACK calculations from Convex with evidence-grounded GPT-4o interpretation.
       </footer>
     </div>
   );

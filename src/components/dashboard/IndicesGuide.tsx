@@ -20,6 +20,9 @@ export default function IndicesGuide() {
           </div>
         </AccordionTrigger>
         <AccordionContent className="px-6 pb-6 border-t pt-4">
+          <div className="mb-5 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-xs">
+            The uploaded dataset stores only grades below 1. For item analysis, every missing student-question record is reconstructed as a fully correct response (grade 1), according to the study dataset design.
+          </div>
           <div className="grid md:grid-cols-2 gap-8 mb-6">
             <div className="space-y-2">
               <h4 className="font-bold flex items-center gap-2">
