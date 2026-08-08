@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { useQuery } from "convex/react";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
@@ -9,15 +9,32 @@ import {
 } from "recharts";
 import { AlertCircle } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 
 export default function IndicesChart() {
   const [cohortSize, setCohortSize] = useState("");
+  const [saveStatus, setSaveStatus] = useState("");
+  const settings = useQuery(api.analysis.getAssessmentSettings);
+  const saveSettings = useMutation(api.analysis.saveAssessmentSettings);
+  useEffect(() => {
+    if (settings !== undefined) setCohortSize(settings ? String(settings.totalStudentCount) : "");
+  }, [settings]);
   const parsedCohortSize = Number.parseInt(cohortSize, 10);
   const result = useQuery(api.analysis.getQuestionIndices, {
     totalStudentCount: Number.isFinite(parsedCohortSize) && parsedCohortSize > 0
       ? parsedCohortSize
       : undefined,
   });
+
+  const persistCohortSize = async () => {
+    if (!Number.isFinite(parsedCohortSize) || parsedCohortSize <= 0) return;
+    try {
+      const saved = await saveSettings({ totalStudentCount: parsedCohortSize });
+      setSaveStatus(`Saved for this dataset (${saved.totalStudentCount} students).`);
+    } catch (error: unknown) {
+      setSaveStatus(error instanceof Error ? error.message : "Could not save cohort size.");
+    }
+  };
 
   if (!result) return (
     <div className="h-full flex items-center justify-center text-slate-400">
@@ -46,8 +63,12 @@ export default function IndicesChart() {
           placeholder={`At least ${studentCount}`}
           className="h-8 w-40 bg-white"
         />
-        <span>Include students with no recorded errors. Leave blank if every student has at least one error row.</span>
+        <Button type="button" size="sm" className="h-8" onClick={persistCohortSize} disabled={!Number.isFinite(parsedCohortSize) || parsedCohortSize < studentCount}>
+          Apply
+        </Button>
+        <span>Enter all students who took the assessment, including students with no error records.</span>
       </div>
+      {saveStatus && <p className="text-xs text-emerald-700">{saveStatus}</p>}
       {studentCount < 4 && (
         <div className="flex items-center gap-2 text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs">
           <AlertCircle className="h-4 w-4 shrink-0" />

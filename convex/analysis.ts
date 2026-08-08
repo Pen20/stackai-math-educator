@@ -1,8 +1,8 @@
-import { query } from "./_generated/server";
+import { mutation, query } from "./_generated/server";
 import { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 
-async function getVisibleRecords(ctx: QueryCtx) {
+async function getVisibleRecords(ctx: Pick<QueryCtx, "db" | "auth">) {
   const defaultData = await ctx.db
     .query("studentErrors")
     .withIndex("by_createdBy", (q) => q.eq("createdBy", "system"))
@@ -73,6 +73,45 @@ export const getAtRiskStudents = query({
   },
 });
 
+export const getAssessmentSettings = query({
+  handler: async (ctx) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) return null;
+    return await ctx.db
+      .query("assessmentSettings")
+      .withIndex("by_userId", (q) => q.eq("userId", identity.subject))
+      .unique();
+  },
+});
+
+export const saveAssessmentSettings = mutation({
+  args: { totalStudentCount: v.number() },
+  handler: async (ctx, args) => {
+    const identity = await ctx.auth.getUserIdentity();
+    if (!identity) throw new Error("Authentication is required.");
+    const records = await getVisibleRecords(ctx);
+    const representedCount = new Set(records.map((record) => record.studentId)).size;
+    const totalStudentCount = Math.floor(args.totalStudentCount);
+    if (!Number.isFinite(totalStudentCount) || totalStudentCount < representedCount) {
+      throw new Error(`Total cohort must be at least ${representedCount}.`);
+    }
+    const existing = await ctx.db
+      .query("assessmentSettings")
+      .withIndex("by_userId", (q) => q.eq("userId", identity.subject))
+      .unique();
+    if (existing) {
+      await ctx.db.patch(existing._id, { totalStudentCount, updatedAt: Date.now() });
+    } else {
+      await ctx.db.insert("assessmentSettings", {
+        userId: identity.subject,
+        totalStudentCount,
+        updatedAt: Date.now(),
+      });
+    }
+    return { totalStudentCount, representedCount };
+  },
+});
+
 export const getQuestionIndices = query({
   args: { totalStudentCount: v.optional(v.number()) },
   handler: async (ctx, args) => {
@@ -80,9 +119,19 @@ export const getQuestionIndices = query({
     if (records.length === 0) return { questions: [], studentCount: 0 };
 
     const representedStudentIds = [...new Set(records.map((record) => record.studentId))];
-    const suppliedCohortSize = args.totalStudentCount === undefined
+    const identity = await ctx.auth.getUserIdentity();
+    const savedSettings = identity
+      ? await ctx.db.query("assessmentSettings")
+          .withIndex("by_userId", (q) => q.eq("userId", identity.subject))
+          .unique()
+      : null;
+    const requestedCohortSize = args.totalStudentCount ?? savedSettings?.totalStudentCount;
+    if (requestedCohortSize !== undefined && requestedCohortSize < representedStudentIds.length) {
+      throw new Error(`Total cohort must be at least ${representedStudentIds.length}.`);
+    }
+    const suppliedCohortSize = requestedCohortSize === undefined
       ? representedStudentIds.length
-      : Math.max(representedStudentIds.length, Math.floor(args.totalStudentCount));
+      : Math.floor(requestedCohortSize);
     const syntheticCorrectStudents = Array.from(
       { length: suppliedCohortSize - representedStudentIds.length },
       (_, index) => `__all_correct_${index + 1}`,
@@ -96,33 +145,35 @@ export const getQuestionIndices = query({
     const gradeFor = (studentId: string, question: string) =>
       observedGrades.get(`${studentId}||${question}`) ?? 1;
 
-    // Rank students by reconstructed overall assessment mean. The source data
-    // contains only grade < 1 records; a missing pair means fully correct.
-    const sortedStudents = studentIds
-      .map((id) => ({
-        id,
-        avg: questionIds.reduce((sum, question) => sum + gradeFor(id, question), 0) / questionIds.length,
-      }))
-      .sort((a, b) => b.avg - a.avg);
-
-    const studentCount = sortedStudents.length;
+    const studentCount = studentIds.length;
     const boundary = Math.max(1, Math.floor(studentCount * 0.27));
-    const topGroup = new Set(sortedStudents.slice(0, boundary).map(s => s.id));
-    const bottomGroup = new Set(sortedStudents.slice(-boundary).map(s => s.id));
 
     const questions = questionIds.map((q) => {
       const questionErrorRecords = records.filter((record) => record.question === q);
       const allGrades = studentIds.map((studentId) => gradeFor(studentId, q));
       const difficultyIndex = allGrades.reduce((sum, grade) => sum + grade, 0) / allGrades.length;
-      const topGrades = studentIds.filter((id) => topGroup.has(id)).map((id) => gradeFor(id, q));
-      const bottomGrades = studentIds.filter((id) => bottomGroup.has(id)).map((id) => gradeFor(id, q));
-      const meanTop = topGrades.reduce((sum, grade) => sum + grade, 0) / topGrades.length;
-      const meanBottom = bottomGrades.reduce((sum, grade) => sum + grade, 0) / bottomGrades.length;
+      // Rank on the rest score (all other questions), avoiding part-whole
+      // inflation from using the analysed question to define its own groups.
+      const otherQuestions = questionIds.filter((question) => question !== q);
+      const ranked = studentIds
+        .map((id) => ({
+          id,
+          restScore: otherQuestions.length
+            ? otherQuestions.reduce((sum, question) => sum + gradeFor(id, question), 0) / otherQuestions.length
+            : 0,
+        }))
+        .sort((a, b) => b.restScore - a.restScore || a.id.localeCompare(b.id));
+      const topIds = ranked.slice(0, boundary).map((student) => student.id);
+      const bottomIds = ranked.slice(-boundary).map((student) => student.id);
+      const meanTop = topIds.reduce((sum, id) => sum + gradeFor(id, q), 0) / topIds.length;
+      const meanBottom = bottomIds.reduce((sum, id) => sum + gradeFor(id, q), 0) / bottomIds.length;
 
       return {
         question: q,
         difficultyIndex: parseFloat(difficultyIndex.toFixed(2)),
-        discriminationIndex: parseFloat((meanTop - meanBottom).toFixed(2)),
+        discriminationIndex: otherQuestions.length
+          ? parseFloat((meanTop - meanBottom).toFixed(2))
+          : null,
         sampleSize: studentIds.length,
         observedErrorResponses: questionErrorRecords.length,
         reconstructedCorrectResponses: studentIds.length - questionErrorRecords.length,
@@ -133,9 +184,11 @@ export const getQuestionIndices = query({
       questions,
       studentCount,
       representedStudentCount: representedStudentIds.length,
-      suppliedCohortSize: args.totalStudentCount ?? null,
+      suppliedCohortSize: requestedCohortSize ?? null,
+      cohortSizeConfirmed: requestedCohortSize !== undefined,
       allCorrectStudentsAdded: syntheticCorrectStudents.length,
       reconstructionRule: "Missing student-question records, including supplied cohort members with no error rows, are treated as fully correct responses (grade 1).",
+      discriminationRule: "Upper and lower 27% groups are ranked separately for each question using the reconstructed mean score on all other questions.",
     };
   },
 });

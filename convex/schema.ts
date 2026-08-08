@@ -89,6 +89,13 @@ export default defineSchema({
     createdAt: v.number(),
   }).index("by_userId", ["userId"]),
 
+  // Dataset-level metadata that cannot be inferred from an error-only CSV.
+  assessmentSettings: defineTable({
+    userId: v.string(),
+    totalStudentCount: v.number(),
+    updatedAt: v.number(),
+  }).index("by_userId", ["userId"]),
+
   // RAG Context Usage Logging
   contextUsed: defineTable({
     messageId: v.string(),
