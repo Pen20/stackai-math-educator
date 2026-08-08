@@ -20,11 +20,10 @@ export default function IndicesChart() {
     if (settings !== undefined) setCohortSize(settings ? String(settings.totalStudentCount) : "");
   }, [settings]);
   const parsedCohortSize = Number.parseInt(cohortSize, 10);
-  const result = useQuery(api.analysis.getQuestionIndices, {
-    totalStudentCount: Number.isFinite(parsedCohortSize) && parsedCohortSize > 0
-      ? parsedCohortSize
-      : undefined,
-  });
+  // Calculations use only persisted metadata. Passing the draft value here
+  // caused transient inputs (for example "6" while typing "618") to trigger
+  // an invalid Convex query and crash the page.
+  const result = useQuery(api.analysis.getQuestionIndices, {});
 
   const persistCohortSize = async () => {
     if (!Number.isFinite(parsedCohortSize) || parsedCohortSize <= 0) return;
@@ -43,6 +42,11 @@ export default function IndicesChart() {
   );
 
   const { questions, studentCount } = result;
+  const minimumCohortSize = (
+    "representedStudentCount" in result && typeof result.representedStudentCount === "number"
+      ? result.representedStudentCount
+      : studentCount
+  ) ?? 0;
 
   if (questions.length === 0) return (
     <div className="h-full flex items-center justify-center text-slate-400">
@@ -57,13 +61,13 @@ export default function IndicesChart() {
         <Input
           id="cohort-size"
           type="number"
-          min={studentCount}
+          min={minimumCohortSize}
           value={cohortSize}
           onChange={(event) => setCohortSize(event.target.value)}
-          placeholder={`At least ${studentCount}`}
+          placeholder={`At least ${minimumCohortSize}`}
           className="h-8 w-40 bg-white"
         />
-        <Button type="button" size="sm" className="h-8" onClick={persistCohortSize} disabled={!Number.isFinite(parsedCohortSize) || parsedCohortSize < studentCount}>
+        <Button type="button" size="sm" className="h-8" onClick={persistCohortSize} disabled={!Number.isFinite(parsedCohortSize) || parsedCohortSize < minimumCohortSize}>
           Apply
         </Button>
         <span>Enter all students who took the assessment, including students with no error records.</span>
