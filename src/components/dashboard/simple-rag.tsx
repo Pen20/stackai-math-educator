@@ -32,6 +32,7 @@ export default function SimpleRAG() {
   const studentSummary = useQuery(api.analysis.getDataSummary);
   const saveMessage = useMutation(api.chat.saveMessage);
   const clearHistory = useMutation(api.chat.clearHistory);
+  const latestQuestion = [...history].reverse().find((message) => message.role === "user")?.content;
 
   useEffect(() => {
     if (!historyLoaded && savedMessages !== undefined) {
@@ -158,7 +159,7 @@ export default function SimpleRAG() {
         </CardContent>
       </Card>
 
-      <Card className="lg:col-span-2 border-slate-200 flex flex-col h-[650px]">
+      <Card className="lg:col-span-2 border-slate-200 flex flex-col h-[650px] min-h-0 overflow-hidden">
         <CardHeader className="border-b flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-lg flex items-center gap-2">
@@ -174,9 +175,18 @@ export default function SimpleRAG() {
           )}
         </CardHeader>
 
-        <CardContent className="flex-1 flex flex-col p-0 overflow-hidden">
-          <ScrollArea className="flex-1 p-4">
-            <div className="space-y-4">
+        {latestQuestion && (
+          <div className="shrink-0 border-b border-indigo-100 bg-indigo-50 px-5 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-indigo-500">
+              {isChatting ? "Question en cours" : "Dernière question"}
+            </p>
+            <p className="mt-1 text-sm font-medium text-slate-800">{latestQuestion}</p>
+          </div>
+        )}
+
+        <CardContent className="flex-1 min-h-0 flex flex-col p-0 overflow-hidden">
+          <ScrollArea type="always" className="flex-1 min-h-0">
+            <div className="space-y-4 p-4 pr-6">
               {history.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-20 text-slate-400 space-y-2">
                   <Bot className="h-12 w-12 opacity-20" />
