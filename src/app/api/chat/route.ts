@@ -4,6 +4,49 @@ import { api } from "../../../../convex/_generated/api";
 
 const MAX_HISTORY_MESSAGES = 12;
 
+// ---------------------------------------------------------------------------
+// Benchmark instrumentation (development only).
+//
+// Set BENCHMARK_LOG=1 in .env.local to append one JSONL record per turn to
+// benchmark/runs/<date>.jsonl, recording which analysis function the planner selected, the
+// arguments it extracted, the raw tool output, and the streamed answer. Those first three are
+// invisible in the chat transcript, so without this log a benchmark run can only score the final
+// narrative - not function selection, parameter extraction, or backend correctness.
+//
+// Tag a turn by prefixing the message with its benchmark ID, e.g. "#Q021 How many error
+// responses are recorded for Q1?". The tag is stripped before the model sees it, so the query
+// text under test stays exactly as specified in the sheet.
+const BENCHMARK_LOG_ENABLED = process.env.BENCHMARK_LOG === "1";
+const BENCHMARK_TAG = /^\s*#(Q\d{3}(?:-[A-Z])?)\s+/;
+const MAX_LOGGED_RESULT_CHARS = 40000;
+
+type BenchmarkRecord = {
+  runId: string | null;
+  benchmarkId: string | null;
+  timestamp: string;
+  query: string;
+  turnIndex: number;
+  toolCalls: Array<{ function: string; arguments: unknown; rawArguments: string }>;
+  toolResults: Array<{ function: string; result: unknown; truncated: boolean }>;
+  answer: string;
+  answerChars: number;
+  error?: string;
+};
+
+async function writeBenchmarkRecord(record: BenchmarkRecord) {
+  if (!BENCHMARK_LOG_ENABLED) return;
+  try {
+    const [fs, path] = await Promise.all([import("node:fs/promises"), import("node:path")]);
+    const directory = path.join(process.cwd(), "benchmark", "runs");
+    await fs.mkdir(directory, { recursive: true });
+    const file = path.join(directory, `${record.timestamp.slice(0, 10)}.jsonl`);
+    await fs.appendFile(file, JSON.stringify(record) + "\n", "utf8");
+  } catch (error) {
+    // Never let instrumentation break a chat turn.
+    console.error("[benchmark-log]", error instanceof Error ? error.message : error);
+  }
+}
+
 const tools: OpenAI.Chat.Completions.ChatCompletionTool[] = [
   {
     type: "function",
@@ -156,6 +199,28 @@ export async function POST(req: Request) {
       content: message.content,
     }));
 
+    // Strip a leading benchmark tag so the model receives the query exactly as specified.
+    let benchmarkId: string | null = null;
+    const lastMessage = recentMessages[recentMessages.length - 1];
+    if (lastMessage?.role === "user") {
+      const tagged = BENCHMARK_TAG.exec(lastMessage.content);
+      if (tagged) {
+        benchmarkId = tagged[1];
+        lastMessage.content = lastMessage.content.slice(tagged[0].length);
+      }
+    }
+    const benchmarkTurn: BenchmarkRecord = {
+      runId: req.headers.get("x-benchmark-run-id"),
+      benchmarkId,
+      timestamp: new Date().toISOString(),
+      query: lastMessage?.content ?? "",
+      turnIndex: messages.length,
+      toolCalls: [],
+      toolResults: [],
+      answer: "",
+      answerChars: 0,
+    };
+
     const planner = await openai.chat.completions.create({
       model: "gpt-4o",
       temperature: 0.1,
@@ -172,36 +237,61 @@ export async function POST(req: Request) {
     for (const call of planningMessage.tool_calls) {
       if (call.type !== "function") continue;
       const args = JSON.parse(call.function.arguments || "{}");
-      let result: unknown;
-      switch (call.function.name) {
-        case "get_error_dataset_overview":
-          result = await convex.query(api.analysis.getErrorDatasetOverview, {});
-          break;
-        case "get_question_error_profile":
-          result = await convex.query(api.analysis.getQuestionErrorProfile, args);
-          break;
-        case "get_student_error_profile":
-          result = await convex.query(api.analysis.getStudentErrorProfile, args);
-          break;
-        case "get_error_examples":
-          result = await convex.query(api.analysis.getErrorExamples, args);
-          break;
-        case "get_support_priority_students":
-          result = await convex.query(api.analysis.getSupportPriorityStudents, args);
-          break;
-        case "compare_question_errors":
-          result = await convex.query(api.analysis.compareQuestionErrors, args);
-          break;
-        case "compare_seed_variants":
-          result = await convex.query(api.analysis.compareSeedVariants, args);
-          break;
-        case "get_question_indices":
-          result = await convex.query(api.analysis.getQuestionIndices, args);
-          break;
-        default:
-          result = { error: `Unsupported analysis function: ${call.function.name}` };
+      if (BENCHMARK_LOG_ENABLED) {
+        benchmarkTurn.toolCalls.push({
+          function: call.function.name,
+          arguments: args,
+          rawArguments: call.function.arguments || "{}",
+        });
       }
-      toolMessages.push({ role: "tool", tool_call_id: call.id, content: JSON.stringify(result) });
+      let result: unknown;
+      try {
+        switch (call.function.name) {
+          case "get_error_dataset_overview":
+            result = await convex.query(api.analysis.getErrorDatasetOverview, {});
+            break;
+          case "get_question_error_profile":
+            result = await convex.query(api.analysis.getQuestionErrorProfile, args);
+            break;
+          case "get_student_error_profile":
+            result = await convex.query(api.analysis.getStudentErrorProfile, args);
+            break;
+          case "get_error_examples":
+            result = await convex.query(api.analysis.getErrorExamples, args);
+            break;
+          case "get_support_priority_students":
+            result = await convex.query(api.analysis.getSupportPriorityStudents, args);
+            break;
+          case "compare_question_errors":
+            result = await convex.query(api.analysis.compareQuestionErrors, args);
+            break;
+          case "compare_seed_variants":
+            result = await convex.query(api.analysis.compareSeedVariants, args);
+            break;
+          case "get_question_indices":
+            result = await convex.query(api.analysis.getQuestionIndices, args);
+            break;
+          default:
+            result = { error: `Unsupported analysis function: ${call.function.name}` };
+        }
+      } catch (error) {
+        benchmarkTurn.error = error instanceof Error ? error.message : String(error);
+        benchmarkTurn.answer = `Error: ${benchmarkTurn.error}`;
+        benchmarkTurn.answerChars = benchmarkTurn.answer.length;
+        await writeBenchmarkRecord(benchmarkTurn);
+        throw error;
+      }
+      const serialised = JSON.stringify(result);
+      toolMessages.push({ role: "tool", tool_call_id: call.id, content: serialised });
+
+      if (BENCHMARK_LOG_ENABLED) {
+        const oversized = serialised.length > MAX_LOGGED_RESULT_CHARS;
+        benchmarkTurn.toolResults.push({
+          function: call.function.name,
+          result: oversized ? serialised.slice(0, MAX_LOGGED_RESULT_CHARS) : result,
+          truncated: oversized,
+        });
+      }
     }
 
     const stream = await openai.chat.completions.create({
@@ -219,15 +309,26 @@ export async function POST(req: Request) {
     const encoder = new TextEncoder();
     const readable = new ReadableStream({
       async start(controller) {
+        let answer = "";
         try {
           for await (const chunk of stream) {
             const content = chunk.choices[0]?.delta?.content ?? "";
-            if (content) controller.enqueue(encoder.encode(content));
+            if (content) {
+              if (BENCHMARK_LOG_ENABLED) answer += content;
+              controller.enqueue(encoder.encode(content));
+            }
           }
         } catch (error) {
+          benchmarkTurn.error = error instanceof Error ? error.message : String(error);
+          benchmarkTurn.answer = answer;
+          benchmarkTurn.answerChars = answer.length;
+          void writeBenchmarkRecord(benchmarkTurn);
           controller.error(error);
           return;
         }
+        benchmarkTurn.answer = answer;
+        benchmarkTurn.answerChars = answer.length;
+        void writeBenchmarkRecord(benchmarkTurn);
         controller.close();
       },
     });

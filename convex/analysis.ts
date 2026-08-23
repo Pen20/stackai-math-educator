@@ -3,20 +3,27 @@ import { QueryCtx } from "./_generated/server";
 import { v } from "convex/values";
 
 async function getVisibleRecords(ctx: Pick<QueryCtx, "db" | "auth">) {
-  const defaultData = await ctx.db
+  const identity = await ctx.auth.getUserIdentity();
+  if (identity) {
+    // Probe the user's indexed partition first. This avoids reading the entire
+    // system dataset only to discard it when a private upload is active.
+    const firstUserRecord = await ctx.db
+      .query("studentErrors")
+      .withIndex("by_createdBy", (q) => q.eq("createdBy", identity.subject))
+      .first();
+
+    if (firstUserRecord) {
+      return await ctx.db
+        .query("studentErrors")
+        .withIndex("by_createdBy", (q) => q.eq("createdBy", identity.subject))
+        .collect();
+    }
+  }
+
+  return await ctx.db
     .query("studentErrors")
     .withIndex("by_createdBy", (q) => q.eq("createdBy", "system"))
     .collect();
-
-  const identity = await ctx.auth.getUserIdentity();
-  if (!identity) return defaultData;
-
-  const userData = await ctx.db
-    .query("studentErrors")
-    .withIndex("by_createdBy", (q) => q.eq("createdBy", identity.subject))
-    .collect();
-
-  return userData.length > 0 ? userData : defaultData;
 }
 
 export const getStudentHistory = query({

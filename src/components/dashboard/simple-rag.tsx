@@ -8,10 +8,18 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Bot, Database, Loader2, RotateCcw, Send, ShieldCheck, User } from "lucide-react";
+import { Bot, CheckCircle2, Database, Download, FlaskConical, Loader2, Play, RotateCcw, Send, ShieldCheck, User } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 type Message = { role: "user" | "assistant"; content: string };
+type BenchmarkQuery = {
+  id: string;
+  query: string;
+  family: number;
+  familyName: string;
+  sequence: string;
+  backendSupport: string;
+};
 
 const suggestedQuestions = [
   "Summarise the recorded error responses.",
@@ -26,6 +34,10 @@ export default function SimpleRAG() {
   const [history, setHistory] = useState<Message[]>([]);
   const [isChatting, setIsChatting] = useState(false);
   const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [benchmarkQueries, setBenchmarkQueries] = useState<BenchmarkQuery[]>([]);
+  const [benchmarkIndex, setBenchmarkIndex] = useState(0);
+  const [benchmarkRunId, setBenchmarkRunId] = useState("");
+  const [completedBenchmarkIds, setCompletedBenchmarkIds] = useState<string[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
   const savedMessages = useQuery(api.chat.getMessages);
@@ -42,19 +54,53 @@ export default function SimpleRAG() {
   }, [savedMessages, historyLoaded]);
 
   useEffect(() => {
+    fetch("/api/benchmark")
+      .then((response) => response.ok ? response.json() : null)
+      .then((data) => setBenchmarkQueries(data?.queries ?? []))
+      .catch(() => setBenchmarkQueries([]));
+    const savedRun = localStorage.getItem("stack-benchmark-run");
+    if (savedRun) {
+      try {
+        const state = JSON.parse(savedRun) as { runId: string; index: number; completed: string[] };
+        setBenchmarkRunId(state.runId);
+        setBenchmarkIndex(state.index);
+        setCompletedBenchmarkIds(state.completed);
+      } catch { localStorage.removeItem("stack-benchmark-run"); }
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!benchmarkRunId) return;
+    localStorage.setItem("stack-benchmark-run", JSON.stringify({
+      runId: benchmarkRunId,
+      index: benchmarkIndex,
+      completed: completedBenchmarkIds,
+    }));
+  }, [benchmarkRunId, benchmarkIndex, completedBenchmarkIds]);
+
+  useEffect(() => {
     scrollRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [history]);
 
-  const submitQuestion = async (text: string) => {
+  const submitQuestion = async (
+    text: string,
+    benchmarkId?: string,
+    baseHistory: Message[] = history,
+  ) => {
     const trimmed = text.trim();
     if (!trimmed || isChatting || !studentSummary) return;
 
     const userMessage: Message = { role: "user", content: trimmed };
-    const updatedHistory = [...history, userMessage];
+    const updatedHistory = [...baseHistory, userMessage];
     setHistory([...updatedHistory, { role: "assistant", content: "" }]);
     setQuestion("");
     setIsChatting(true);
-    await saveMessage({ role: "user", content: trimmed });
+    // Benchmark transcripts are already recorded in local JSONL files. Keeping
+    // them out of Convex avoids two writes per turn plus later deletion reads
+    // and writes, while normal educator conversations remain persisted.
+    if (!benchmarkId) {
+      await saveMessage({ role: "user", content: trimmed });
+    }
 
     let assistantContent = "";
     try {
@@ -65,8 +111,15 @@ export default function SimpleRAG() {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          ...(benchmarkId && benchmarkRunId ? { "X-Benchmark-Run-Id": benchmarkRunId } : {}),
         },
-        body: JSON.stringify({ messages: updatedHistory }),
+        body: JSON.stringify({
+          messages: benchmarkId
+            ? updatedHistory.map((message, index) => index === updatedHistory.length - 1
+              ? { ...message, content: `#${benchmarkId} ${message.content}` }
+              : message)
+            : updatedHistory,
+        }),
       });
       if (!response.ok || !response.body) {
         const detail = await response.text().catch(() => "");
@@ -85,7 +138,12 @@ export default function SimpleRAG() {
           return next;
         });
       }
-      await saveMessage({ role: "assistant", content: assistantContent });
+      if (!benchmarkId) {
+        await saveMessage({ role: "assistant", content: assistantContent });
+      }
+      if (benchmarkId) {
+        setCompletedBenchmarkIds((current) => current.includes(benchmarkId) ? current : [...current, benchmarkId]);
+      }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Could not get a response.";
       setHistory((current) => {
@@ -93,9 +151,52 @@ export default function SimpleRAG() {
         next[next.length - 1] = { role: "assistant", content: `Error: ${message}` };
         return next;
       });
+      if (benchmarkId) {
+        setCompletedBenchmarkIds((current) => current.includes(benchmarkId) ? current : [...current, benchmarkId]);
+      }
     } finally {
       setIsChatting(false);
     }
+  };
+
+  const startBenchmark = async () => {
+    setHistory([]);
+    setHistoryLoaded(true);
+    setBenchmarkIndex(0);
+    setCompletedBenchmarkIds([]);
+    setBenchmarkRunId(`run-${new Date().toISOString().replace(/[^0-9]/g, "").slice(0, 14)}-${crypto.randomUUID().slice(0, 8)}`);
+  };
+
+  const runBenchmarkQuestion = async () => {
+    const item = benchmarkQueries[benchmarkIndex];
+    if (!item || !benchmarkRunId || isChatting) return;
+    const previous = benchmarkQueries[benchmarkIndex - 1];
+    const preserveSequence = item.family === 10 && previous?.sequence && previous.sequence === item.sequence;
+    const baseHistory = preserveSequence ? history : [];
+    if (!preserveSequence) {
+      setHistory([]);
+      setHistoryLoaded(true);
+    }
+    await submitQuestion(item.query, item.id, baseHistory);
+  };
+
+  const downloadBenchmarkCsv = async () => {
+    if (!benchmarkRunId) return;
+    const response = await fetch("/api/benchmark", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ runId: benchmarkRunId }),
+    });
+    if (!response.ok) {
+      alert(await response.text());
+      return;
+    }
+    const url = URL.createObjectURL(await response.blob());
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `benchmark-${benchmarkRunId}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
   };
 
   const handleSubmit = async (event: React.FormEvent) => {
@@ -156,6 +257,59 @@ export default function SimpleRAG() {
               </button>
             ))}
           </div>
+
+          {benchmarkQueries.length > 0 && (
+            <div className="space-y-3 border-t border-slate-200 pt-4">
+              <div className="flex items-center gap-2">
+                <FlaskConical className="h-4 w-4 text-violet-600" />
+                <p className="text-xs font-semibold text-slate-700">Mode benchmark</p>
+              </div>
+              {!benchmarkRunId ? (
+                <Button type="button" size="sm" onClick={startBenchmark} disabled={isChatting} className="w-full bg-violet-600 hover:bg-violet-700">
+                  <Play className="h-3.5 w-3.5" /> Nouveau run (111 tours)
+                </Button>
+              ) : (
+                <>
+                  <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs space-y-2">
+                    <div className="flex justify-between text-violet-700">
+                      <span className="font-semibold">{benchmarkRunId}</span>
+                      <span>{completedBenchmarkIds.length}/{benchmarkQueries.length}</span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-violet-100">
+                      <div className="h-full bg-violet-600" style={{ width: `${100 * completedBenchmarkIds.length / benchmarkQueries.length}%` }} />
+                    </div>
+                    <p className="font-semibold text-slate-700">
+                      {benchmarkQueries[benchmarkIndex]?.id} · {benchmarkQueries[benchmarkIndex]?.familyName}
+                    </p>
+                    <p className="text-slate-600">{benchmarkQueries[benchmarkIndex]?.query}</p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" size="sm" onClick={runBenchmarkQuestion} disabled={isChatting || completedBenchmarkIds.includes(benchmarkQueries[benchmarkIndex]?.id)} className="flex-1 bg-violet-600 hover:bg-violet-700">
+                      {isChatting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                      Exécuter
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => setBenchmarkIndex((index) => Math.min(index + 1, benchmarkQueries.length - 1))} disabled={isChatting || !completedBenchmarkIds.includes(benchmarkQueries[benchmarkIndex]?.id)}>
+                      Suivante
+                    </Button>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" size="sm" variant="outline" onClick={() => setBenchmarkIndex((index) => Math.max(0, index - 1))} disabled={isChatting || benchmarkIndex === 0} className="flex-1">
+                      Précédente
+                    </Button>
+                    <Button type="button" size="sm" variant="outline" onClick={downloadBenchmarkCsv} disabled={isChatting || completedBenchmarkIds.length === 0} className="flex-1">
+                      <Download className="h-3.5 w-3.5" /> CSV
+                    </Button>
+                  </div>
+                  {completedBenchmarkIds.includes(benchmarkQueries[benchmarkIndex]?.id) && (
+                    <p className="flex items-center gap-1 text-xs text-emerald-700"><CheckCircle2 className="h-3.5 w-3.5" /> Tour enregistré</p>
+                  )}
+                  <Button type="button" size="sm" variant="ghost" onClick={startBenchmark} disabled={isChatting} className="w-full text-xs text-slate-500">
+                    Recommencer avec un nouveau run
+                  </Button>
+                </>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

@@ -51,3 +51,6 @@ data/
 /scripts/.generated_ai_keynote/
 
 *.md
+
+# benchmark run logs (contain full tool output)
+benchmark/runs/

@@ -32,8 +32,13 @@ export default function Dashboard() {
 
   const { isLoaded, isSignedIn } = useUser();
 
-  // Adapted to match existing API structure: api.studentErrors.getVisibleErrors
-  const analysisData = useQuery(api.studentErrors.getVisibleErrors) || [];
+  // Raw records are only needed by these two client-side charts. Avoid loading
+  // the complete dataset merely because the dashboard was opened.
+  const needsRawAnalysisData = showGradeDist || showPieChart;
+  const analysisData = useQuery(
+    api.studentErrors.getVisibleErrors,
+    needsRawAnalysisData ? {} : "skip",
+  ) || [];
   // Adapted to match existing API structure: api.users.updateUserActivity
   const trackVisit = useMutation(api.users.updateUserActivity);
 

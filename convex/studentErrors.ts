@@ -26,23 +26,27 @@ export const getErrors = query({
 export const getVisibleErrors = query({
   handler: async (ctx) => {
     const identity = await ctx.auth.getUserIdentity();
-    
-    // 1. Always get the "System" default data
-    const defaultData = await ctx.db
+
+    if (identity) {
+      // Check the user's indexed partition before touching the much larger
+      // system fallback. A private dataset means the system rows are never read.
+      const firstUserRecord = await ctx.db
+        .query("studentErrors")
+        .withIndex("by_createdBy", (q) => q.eq("createdBy", identity.subject))
+        .first();
+
+      if (firstUserRecord) {
+        return await ctx.db
+          .query("studentErrors")
+          .withIndex("by_createdBy", (q) => q.eq("createdBy", identity.subject))
+          .collect();
+      }
+    }
+
+    return await ctx.db
       .query("studentErrors")
       .withIndex("by_createdBy", (q) => q.eq("createdBy", "system"))
       .collect();
-
-    if (!identity) return defaultData;
-
-    // 2. Get the user's private uploads
-    const userData = await ctx.db
-      .query("studentErrors")
-      .withIndex("by_createdBy", (q) => q.eq("createdBy", identity.subject))
-      .collect();
-
-    // If the user has uploaded their own data, show that instead of the default
-    return userData.length > 0 ? userData : defaultData;
   },
 });
 
