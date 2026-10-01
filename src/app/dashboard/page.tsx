@@ -6,9 +6,9 @@ import { useUser } from "@clerk/nextjs";
 import { api } from "../../../convex/_generated/api";
 import { 
   LayoutDashboard, Target, FolderOpen, TrendingUp, 
-  PieChart as PieChartIcon, Info, Search, FileUp,
+  PieChart as PieChartIcon, Info, Search,
   BookText, BrainCircuit, RefreshCw, Settings, PenTool,
-  BarChart3, AlertCircle
+  BarChart3, AlertCircle, UserRound
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -21,20 +21,23 @@ import NEAPieChart from "@/components/dashboard/NEAPieChart";
 import IndicesChart from "@/components/dashboard/IndicesChart";
 import { CSVUploader } from "@/components/dashboard/CSVUploader";
 import IndicesGuide from "@/components/dashboard/IndicesGuide";
+import StudentQuestionGrades from "@/components/dashboard/StudentQuestionGrades";
 
 export default function Dashboard() {
   const [showGradeDist, setShowGradeDist] = useState(false);
   const [showPieChart, setShowPieChart] = useState(false);
   const [showIndices, setShowIndices] = useState(false);
-  // No longer needed: const [showSimpleRAG, setShowSimpleRAG] = useState(false);
+  const [showStudentGrades, setShowStudentGrades] = useState(false);
   const [selectedQuestion, setSelectedQuestion] = useState<string>("");
+  const [selectedStudentId, setSelectedStudentId] = useState<string>("");
+  const [selectedStudentQuestion, setSelectedStudentQuestion] = useState<string>("all");
   const [filterGradeByQuestion, setFilterGradeByQuestion] = useState(false);
 
   const { isLoaded, isSignedIn } = useUser();
 
   // Raw records are only needed by these two client-side charts. Avoid loading
   // the complete dataset merely because the dashboard was opened.
-  const needsRawAnalysisData = showGradeDist || showPieChart;
+  const needsRawAnalysisData = showGradeDist || showPieChart || showStudentGrades;
   const analysisData = useQuery(
     api.studentErrors.getVisibleErrors,
     needsRawAnalysisData ? {} : "skip",
@@ -49,9 +52,27 @@ export default function Dashboard() {
   }, [isLoaded, isSignedIn, trackVisit]);
 
   const questions = Array.from(new Set(analysisData
-    .map((d: any) => d.question)
+    .map((d) => d.question)
     .filter((q: string) => q && q.trim() !== "")
   ));
+
+  const studentIds = Array.from(new Set(analysisData
+    .map((record) => record.studentId)
+    .filter((studentId: string) => studentId && studentId.trim() !== "")
+  )).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }));
+
+  const selectedStudentQuestions = selectedStudentId
+    ? Array.from(new Set(analysisData
+        .filter((record) => record.studentId === selectedStudentId)
+        .map((record) => record.question)
+        .filter((question: string) => question && question.trim() !== "")
+      )).sort((a, b) => String(a).localeCompare(String(b), undefined, { numeric: true }))
+    : [];
+
+  const handleStudentChange = (studentId: string) => {
+    setSelectedStudentId(studentId);
+    setSelectedStudentQuestion("all");
+  };
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-6 bg-slate-50/30 min-h-screen">
@@ -76,7 +97,7 @@ export default function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-slate-500">
-            Analyze distributions and evaluate question difficulty/discrimination indices.
+            Analyze distributions and evaluate question facility/discrimination indices.
           </CardContent>
         </Card>
         <Card className="bg-white shadow-sm border-slate-200">
@@ -86,7 +107,7 @@ export default function Dashboard() {
             </CardTitle>
           </CardHeader>
           <CardContent className="text-xs text-slate-500">
-            Currently using <code>predicting_students_errors.csv</code> for demonstration.
+            Currently using <code>errors_dataset.csv</code> for demonstration.
           </CardContent>
         </Card>
         <Card className="bg-white shadow-sm border-slate-200">
@@ -108,7 +129,7 @@ export default function Dashboard() {
           onClick={() => setShowGradeDist(!showGradeDist)}
           className="gap-2"
         >
-          <TrendingUp className="h-4 w-4" /> Grade Distribution
+          <TrendingUp className="h-4 w-4" /> Error-Response Grade Distribution
         </Button>
         
         <Select onValueChange={setSelectedQuestion} value={selectedQuestion}>
@@ -124,10 +145,49 @@ export default function Dashboard() {
           variant={showPieChart ? "default" : "secondary"}
           onClick={() => setShowPieChart(!showPieChart)}
           className="gap-2"
-          disabled={!selectedQuestion}
         >
           <PieChartIcon className="h-4 w-4" /> NEA Pie Chart
         </Button>
+
+        <Button
+          variant={showStudentGrades ? "default" : "secondary"}
+          onClick={() => setShowStudentGrades(!showStudentGrades)}
+          className="gap-2"
+        >
+          <UserRound className="h-4 w-4" /> Student Grades
+        </Button>
+
+        {(showPieChart || showStudentGrades) && (
+          <div className="flex w-full flex-wrap items-center gap-3 border-t border-slate-200 pt-4">
+            <div className="flex items-center gap-2 text-sm font-medium text-slate-700">
+              <UserRound className="h-4 w-4 text-emerald-600" /> Student analysis
+            </div>
+            <Select onValueChange={handleStudentChange} value={selectedStudentId}>
+              <SelectTrigger className="w-full sm:w-[240px]" aria-label="Select a student">
+                <SelectValue placeholder="Select a student_id..." />
+              </SelectTrigger>
+              <SelectContent>
+                {studentIds.map((studentId) => <SelectItem key={studentId as string} value={studentId as string}>{studentId as string}</SelectItem>)}
+              </SelectContent>
+            </Select>
+            {showPieChart && (
+              <Select onValueChange={setSelectedStudentQuestion} value={selectedStudentQuestion} disabled={!selectedStudentId}>
+                <SelectTrigger className="w-full sm:w-[260px]" aria-label="Select question scope">
+                  <SelectValue placeholder="Select analysis scope..." />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All attempted questions</SelectItem>
+                  {selectedStudentQuestions.map((question) => <SelectItem key={question as string} value={question as string}>{question as string}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            )}
+            {selectedStudentId && (
+              <span className="text-xs text-slate-500">
+                {selectedStudentQuestions.length} question{selectedStudentQuestions.length === 1 ? "" : "s"} with recorded errors
+              </span>
+            )}
+          </div>
+        )}
 
         <Button 
           variant={showIndices ? "default" : "secondary"}
@@ -176,15 +236,54 @@ export default function Dashboard() {
           </Card>
         )}
 
-        {showPieChart && selectedQuestion && (
+        {showPieChart && (
           <Card className="shadow-md">
             <CardHeader className="border-b pb-4">
               <CardTitle className="flex items-center gap-2">
-                <PieChartIcon className="h-5 w-5 text-emerald-600" /> Error Type Breakdown
+                <PieChartIcon className="h-5 w-5 text-emerald-600" />
+                Error Type Breakdown
+                {selectedStudentId && (
+                  <span className="text-sm font-normal text-slate-500">
+                    — Student {selectedStudentId}, {selectedStudentQuestion === "all" ? "all attempted questions" : selectedStudentQuestion}
+                  </span>
+                )}
               </CardTitle>
             </CardHeader>
             <CardContent className="h-[350px] pt-6">
-              <NEAPieChart data={analysisData} question={selectedQuestion} />
+              {selectedStudentId ? (
+                <NEAPieChart
+                  data={analysisData}
+                  studentId={selectedStudentId}
+                  question={selectedStudentQuestion === "all" ? undefined : selectedStudentQuestion}
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-center text-sm text-slate-400">
+                  Select a student_id to view their error type breakdown.
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {showStudentGrades && (
+          <Card className="shadow-md">
+            <CardHeader className="border-b pb-4">
+              <CardTitle className="flex flex-wrap items-center gap-2">
+                <BarChart3 className="h-5 w-5 text-blue-600" /> Grade Received per Question
+                {selectedStudentId && <span className="text-sm font-normal text-slate-500">— Student {selectedStudentId}</span>}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="min-h-[370px] pt-6">
+              {selectedStudentId ? (
+                <StudentQuestionGrades data={analysisData} studentId={selectedStudentId} />
+              ) : (
+                <div className="flex h-[320px] items-center justify-center text-center text-sm text-slate-400">
+                  Select a student_id to view the grade received for each question.
+                </div>
+              )}
+              <p className="mt-4 text-xs text-slate-500">
+                Only incorrect and partially correct responses stored in the uploaded error dataset are shown.
+              </p>
             </CardContent>
           </Card>
         )}
@@ -196,7 +295,9 @@ export default function Dashboard() {
                 <Target className="h-5 w-5 text-indigo-600" /> Question Analysis (Ranked)
               </CardTitle>
             </CardHeader>
-            <CardContent className="h-[400px] pt-6">
+            {/* The card grows to its content. A fixed height here clipped nothing and instead
+                let the chart overflow onto the interpretation guide below, covering its trigger. */}
+            <CardContent className="pt-6">
               <IndicesChart />
             </CardContent>
           </Card>

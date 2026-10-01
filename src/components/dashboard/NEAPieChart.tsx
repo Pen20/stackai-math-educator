@@ -22,12 +22,25 @@ const ALLOWED_CATEGORIES: Record<string, string> = {
 };
 
 interface NEAPieChartProps {
-  data: any[];
-  question: string;
+  data: Array<{ studentId: string; question: string; errorCategory: string[] | string }>;
+  studentId: string;
+  question?: string;
 }
 
-const renderActiveShape = (props: any) => {
-  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload } = props;
+type ActiveShapeProps = {
+  cx: number;
+  cy: number;
+  innerRadius: number;
+  outerRadius: number;
+  startAngle: number;
+  endAngle: number;
+  fill: string;
+  payload?: { name?: string };
+};
+
+const renderActiveShape = (shapeProps: unknown) => {
+  const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill, payload } =
+    shapeProps as ActiveShapeProps;
   if (!payload?.name) return <g />;
 
   const words = payload.name.split(" ");
@@ -48,16 +61,18 @@ const renderActiveShape = (props: any) => {
   );
 };
 
-export default function NEAPieChart({ data, question }: NEAPieChartProps) {
+export default function NEAPieChart({ data, studentId, question }: NEAPieChartProps) {
   const [activeIndex, setActiveIndex] = useState(0);
 
-  // Reset active sector whenever the question changes to avoid out-of-bounds access
+  // Reset active sector whenever the analysis scope changes to avoid out-of-bounds access.
   useEffect(() => {
     setActiveIndex(0);
-  }, [question]);
+  }, [studentId, question]);
 
   const chartData = useMemo(() => {
-    const questionData = data.filter(d => d.question === question);
+    const questionData = data.filter((record) =>
+      record.studentId === studentId && (!question || record.question === question),
+    );
     const counts: Record<string, number> = {};
     let totalEntries = 0;
 
@@ -94,9 +109,9 @@ export default function NEAPieChart({ data, question }: NEAPieChartProps) {
         color: CATEGORY_COLORS[name] ?? "#94a3b8",
       }))
       .sort((a, b) => b.value - a.value);
-  }, [data, question]);
+  }, [data, studentId, question]);
 
-  const onPieEnter = (_: any, index: number) => setActiveIndex(index);
+  const onPieEnter = (_entry: unknown, index: number) => setActiveIndex(index);
 
   if (chartData.length === 0) {
     return (
